@@ -1,0 +1,30 @@
+# dependencies
+node_modules/
+
+# build
+dist/
+dist-ssr/
+*.tsbuildinfo
+
+# Vite
+.vite/
+vite.config.ts.timestamp-*
+
+# secrets (GEMINI_API_KEY lives in .env.local)
+.env
+.env.*
+!.env.example
+
+# logs
+logs/
+*.log
+npm-debug.log*
+bun-debug.log*
+
+# test / coverage
+coverage/
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
