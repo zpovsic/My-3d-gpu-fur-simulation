@@ -1,0 +1,36 @@
+{
+  "name": "fursim",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Interactive 3D WebGL2/GPGPU fur physics and Marschner hair shading simulation for a stylized creature across studio, nature, and live AR camera environments.",
+  "scripts": {
+    "predev": "[ -d node_modules/.bin ] || bun install || npm install",
+    "dev": "vp dev --port=3000 --host=0.0.0.0",
+    "prebuild": "[ -d node_modules/.bin ] || bun install || npm install",
+    "build": "vp build",
+    "prelint": "[ -d node_modules/.bin ] || bun install || npm install",
+    "lint": "tsc --noEmit",
+    "start": "node server.js",
+    "test": "node adversarial_assessor.js",
+    "prepare": "vp config"
+  },
+  "dependencies": {
+    "@google/genai": "^2.4.0",
+    "@vitejs/plugin-react": "^6.1.1",
+    "react": "^19.0.1",
+    "react-dom": "^19.0.1",
+    "three": "^0.169.0",
+    "vite": "npm:@voidzero-dev/vite-plus-core@1.5.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.14.0",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "typescript": "^7.0.2",
+    "vite": "npm:@voidzero-dev/vite-plus-core@1.5.0",
+    "vite-plus": "1.5.0"
+  },
+  "overrides": {
+    "vite": "npm:@voidzero-dev/vite-plus-core@1.5.0"
+  }
+}
