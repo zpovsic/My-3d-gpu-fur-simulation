@@ -4172,5 +4172,10 @@ export function createEnvironmentManager({
       featureCount: detectedFeatureCount,
     }),
     update,
+    setDesktopPetMode: (enabled) => {
+      studioMotes.visible = !enabled;
+      studioShadowMesh.material.opacity = enabled ? 0.52 : 1.0;
+      studioShadowMesh.scale.setScalar(enabled ? 0.85 : 1.0);
+    },
   };
 }

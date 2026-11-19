@@ -29,3 +29,18 @@ release. Add a tool name to select part of the graph. For example, run
 - [ ] If setup, runtime, or package-manager behavior looks wrong, run `vp env doctor` and include its output when asking for help.
 
 <!--VITE PLUS END-->
+
+## Learned User Preferences
+
+- Keep HTML free of inline `style` attributes; place styling rules in `style.css`.
+- Default the Mochi-Puff desktop pet to stationary placement where dragged (roaming off by default, toggleable from the context menu), with interactive monster sound effects enabled and auto-start/desktop shortcut support.
+- Keep `package.json` scripts and hooks compatible with Windows PowerShell (avoid bash-only syntax such as `[ -d ... ]`).
+
+## Learned Workspace Facts
+
+- Run `vp build` before `vp run start` (`node server.js` on port 3000 serves `dist/` when present); use `vp run dev` for hot-reload development.
+- `index.html` intentionally hides the grass-painter navigation pill via `style.css` (`#page-nav a[href*="grass.html"]`) and the `hidden` attribute; the grass scene remains accessible directly at `/grass.html`.
+- The native Windows desktop pet wrapper lives in `desktop/` (.NET 10 WinForms + WebView2 with DWM per-pixel alpha transparency), loads the built web app in `?desktop=1` mode, and stores settings in `%LOCALAPPDATA%\DesktopMochi\settings.json`.
+- Build the desktop pet with `vp run desktop:build` (`vp build && dotnet build desktop/DesktopMochi.csproj -c Release`) and launch it with `vp run desktop`; stop any running `DesktopMochi` process before rebuilding the executable.
+- Interactive creature sound effects are procedurally synthesized with the Web Audio API in `src/monsterAudio.js` without external audio assets, and WebView2 initializes with `--autoplay-policy=no-user-gesture-required`.
+- Environment secrets such as `GEMINI_API_KEY` belong in `.env.local` (excluded by `.gitignore`).

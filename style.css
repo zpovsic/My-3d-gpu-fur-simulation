@@ -1100,3 +1100,28 @@ body.record-mode #page-nav {
     height: 20px;
   }
 }
+
+/* ==========================================================================
+   12. TRANSPARENT DESKTOP PET MODE (?desktop=1)
+   ========================================================================== */
+html.desktop-pet,
+body.desktop-pet,
+body.desktop-pet[data-env] {
+  background: transparent !important;
+  overflow: hidden !important;
+}
+
+body.desktop-pet #page-nav,
+body.desktop-pet #scene-nav,
+body.desktop-pet #ui-root,
+body.desktop-pet #hud-hint,
+body.desktop-pet .mobile-controls-btn,
+body.desktop-pet .mobile-sheet-backdrop,
+body.desktop-pet #tiltshift-overlay {
+  display: none !important;
+}
+
+body.desktop-pet #canvas-container,
+body.desktop-pet #canvas-container canvas {
+  background: transparent !important;
+}

@@ -5,6 +5,7 @@ import { createGPUFurPhysics } from "./gpuPhysics.js";
 import { createGPUFurSystem } from "./furSystem.js";
 import { createMinimalUI, FUR_PRESETS } from "./ui.js";
 import { createEnvironmentManager } from "./environments.js";
+import { createMonsterAudio } from "./monsterAudio.js";
 
 const container = document.getElementById("canvas-container");
 const uiContainer = document.getElementById("ui-root");
@@ -16,8 +17,15 @@ if (hudHint) {
 }
 
 const urlSearchParams = new URLSearchParams(window.location.search);
+const isDesktopPet = urlSearchParams.get("desktop") === "1";
 const forceWebGL = urlSearchParams.get("gpuFur") === "0" || urlSearchParams.get("mode") === "webgl";
 const initialGpuFur = !forceWebGL;
+const monsterAudio = createMonsterAudio({ enabled: urlSearchParams.get("sound") !== "0" });
+
+if (isDesktopPet) {
+  document.documentElement.classList.add("desktop-pet");
+  document.body.classList.add("desktop-pet");
+}
 
 // Initial state from our Sakura Mochi preset + Studio environment (WebGPU Fur mode by default, WebGL fallback / toggleable)
 const simState = {
@@ -37,6 +45,7 @@ const renderer = new THREE.WebGLRenderer({
   powerPreference: "high-performance",
   alpha: true,
 });
+renderer.setClearColor(0x000000, 0);
 renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -57,6 +66,11 @@ controls.minDistance = 2.6;
 controls.maxDistance = 15.0;
 controls.maxPolarAngle = Math.PI * 0.62;
 controls.target.set(0, 0.05, 0);
+if (isDesktopPet) {
+  controls.enableZoom = false;
+  controls.enablePan = false;
+  controls.enabled = false;
+}
 
 // 3. Synchronized 3-Point Studio Lighting Rig
 const keyLight = new THREE.DirectionalLight("#fff7ed", simState.lightIntensity * 1.4);
@@ -146,6 +160,17 @@ function applyCameraFramingForEnvironment(envId) {
     ? Math.max(1.45, Math.min(1.95, 0.82 / Math.max(0.42, aspect)))
     : 1.0;
 
+  if (isDesktopPet) {
+    // Generous framing for transparent square desktop pet window so cheeks, ears, fur tips & boop jump never clip
+    creature.setEnvironmentScale(1.0, 0.0, 0.0);
+    controls.target.set(0.0, 0.06, 0.0);
+    camera.position.set(0.0, 0.36, 5.85);
+    controls.minDistance = 3.8;
+    controls.maxDistance = 8.5;
+    controls.update();
+    return;
+  }
+
   if (isAR) {
     // In AR mode, Mochi is rendered at 1/4 size (s = 0.25) while keeping camera at full room distance
     // so Mochi looks miniature in the real room instead of filling the view
@@ -207,9 +232,15 @@ function applyEnvironmentPreset(envId) {
 
 const ALLOWED_ENV_IDS = new Set(["studio", "meadow", "highrise", "ar"]);
 const urlEnvParam = new URLSearchParams(window.location.search).get("env");
-const initialEnvId =
-  urlEnvParam && ALLOWED_ENV_IDS.has(urlEnvParam) ? urlEnvParam : simState.environment;
+const initialEnvId = isDesktopPet
+  ? "studio"
+  : urlEnvParam && ALLOWED_ENV_IDS.has(urlEnvParam)
+    ? urlEnvParam
+    : simState.environment;
 applyEnvironmentPreset(initialEnvId);
+if (isDesktopPet) {
+  envManager.setDesktopPetMode(true);
+}
 
 // 5. Build Minimalist UI Controls
 const ui = createMinimalUI(uiContainer, simState, (key, value) => {
@@ -377,10 +408,103 @@ function isEventOnUIOverlay(e) {
   );
 }
 
+let desktopDragPending = false;
+let desktopOrbiting = false;
+const desktopDragVelocity = new THREE.Vector3(0, 0, 0);
+const combinedCreatureVelocity = new THREE.Vector3(0, 0, 0);
+
+function postDesktopMessage(payload) {
+  if (window.chrome && window.chrome.webview) {
+    window.chrome.webview.postMessage(payload);
+  }
+}
+
+if (isDesktopPet) {
+  window.addEventListener("contextmenu", (e) => {
+    e.preventDefault();
+    postDesktopMessage({ type: "contextMenu" });
+  });
+
+  window.addEventListener("dblclick", () => {
+    applyCameraFramingForEnvironment("studio");
+    creature.triggerBoop();
+    boopShockwave = 1.0;
+    monsterAudio.playBoop();
+  });
+
+  window.__mochiDesktop = {
+    applyPreset(nameOrIndex, silent = false) {
+      const preset =
+        typeof nameOrIndex === "number"
+          ? FUR_PRESETS[nameOrIndex]
+          : FUR_PRESETS.find((p) => p.name === nameOrIndex);
+      if (!preset) return;
+      Object.assign(simState, preset);
+      const u = furSystem.sharedUniforms;
+      u.uBaseColor.value.set(preset.baseColor);
+      u.uTipColor.value.set(preset.tipColor);
+      u.uFurLength.value = preset.furLength;
+      u.uClumping.value = preset.clumping;
+      u.uCurliness.value = preset.curliness;
+      u.uRoughness.value = preset.roughness;
+      u.uSpecular.value = preset.specular;
+      furSystem.updateDensity(preset.furDensity);
+      creature.skinMaterial.color.set(preset.baseColor).multiplyScalar(0.55);
+      creature.triggerBoop();
+      boopShockwave = 0.8;
+      if (!silent) {
+        monsterAudio.playHappyTrill();
+      }
+    },
+    setGPUFur(enabled) {
+      const flag = Boolean(enabled);
+      simState.gpuFurEnabled = flag;
+      furSystem.setGPUFurEnabled(flag);
+    },
+    setSoundEnabled(enabled) {
+      monsterAudio.setEnabled(Boolean(enabled));
+    },
+    setGlobalPointer(nx, ny) {
+      if (isPointerOverCreature) return;
+      pointerNDC.x = Math.max(-1, Math.min(1, Number(nx) || 0));
+      pointerNDC.y = Math.max(-1, Math.min(1, Number(ny) || 0));
+    },
+    applyDragImpulse(vx, vy) {
+      desktopDragVelocity.set(
+        Math.max(-6, Math.min(6, Number(vx) || 0)),
+        Math.max(-6, Math.min(6, Number(vy) || 0)),
+        0,
+      );
+    },
+    endDrag() {
+      creature.triggerBoop();
+      boopShockwave = 0.45;
+      monsterAudio.playDrop();
+    },
+    boop() {
+      creature.triggerBoop();
+      boopShockwave = 1.0;
+      monsterAudio.playBoop();
+    },
+    resetView() {
+      applyCameraFramingForEnvironment("studio");
+    },
+  };
+}
+
 window.addEventListener("pointermove", (e) => {
   if (isEventOnUIOverlay(e)) {
     isPointerOverCreature = false;
     return;
+  }
+  if (isDesktopPet && desktopDragPending) {
+    const moveDist = Math.hypot(e.clientX - pointerDownPos.x, e.clientY - pointerDownPos.y);
+    if (moveDist >= 5) {
+      desktopDragPending = false;
+      monsterAudio.playPickup();
+      postDesktopMessage({ type: "startDrag" });
+      return;
+    }
   }
   pointerNDC.x = (e.clientX / window.innerWidth) * 2.0 - 1.0;
   pointerNDC.y = -(e.clientY / window.innerHeight) * 2.0 + 1.0;
@@ -403,7 +527,7 @@ window.addEventListener("pointermove", (e) => {
   } else {
     isPointerOverCreature = false;
     pointerVelocity.multiplyScalar(0.5);
-    container.style.cursor = "grab";
+    container.style.cursor = isDesktopPet ? "default" : "grab";
     if (simState.environment === "ar" && tapToPlaceEnabled) {
       envManager.updateARCursor(pointerNDC.x, pointerNDC.y, true);
     }
@@ -416,12 +540,38 @@ window.addEventListener("pointerdown", (e) => {
   if (isEventOnUIOverlay(e)) {
     return;
   }
+  if (isDesktopPet) {
+    if (e.button === 1 || (e.button === 0 && e.altKey)) {
+      desktopOrbiting = true;
+      controls.enabled = true;
+    } else if (e.button === 0) {
+      desktopDragPending = true;
+      controls.enabled = false;
+    }
+    return;
+  }
   if (isPointerOverCreature) {
     controls.enabled = false;
   }
 });
 
 window.addEventListener("pointerup", (e) => {
+  if (isDesktopPet) {
+    const wasDragPending = desktopDragPending;
+    desktopDragPending = false;
+    if (desktopOrbiting) {
+      desktopOrbiting = false;
+      controls.enabled = false;
+      return;
+    }
+    const moveDist = Math.hypot(e.clientX - pointerDownPos.x, e.clientY - pointerDownPos.y);
+    if (wasDragPending && e.button === 0 && moveDist < 6) {
+      creature.triggerBoop();
+      boopShockwave = 1.0;
+      monsterAudio.playBoop();
+    }
+    return;
+  }
   controls.enabled = true;
   const moveDist = Math.hypot(e.clientX - pointerDownPos.x, e.clientY - pointerDownPos.y);
   if (moveDist < 6) {
@@ -431,6 +581,7 @@ window.addEventListener("pointerup", (e) => {
     if (isPointerOverCreature) {
       creature.triggerBoop();
       boopShockwave = 1.0;
+      monsterAudio.playBoop();
     } else if (simState.environment === "ar" && tapToPlaceEnabled) {
       const planeHit = envManager.estimatePlaneAt(pointerNDC.x, pointerNDC.y);
       if (planeHit && planeHit.point) {
@@ -516,14 +667,18 @@ function animate() {
     boopShockwave = 0.0;
   }
 
-  // Decay pointer velocity smoothly
+  // Decay pointer velocity & desktop drag impulse smoothly
   pointerVelocity.multiplyScalar(Math.exp(-dt * 12.0));
+  desktopDragVelocity.multiplyScalar(Math.exp(-dt * 9.0));
+  monsterAudio.updatePetting(pointerVelocity.length(), isPointerOverCreature);
 
   // Update creature breathing, eye tracking, viewer-facing AR orientation, and bounce inertia
   creature.update(dt, pointerNDC, camera.position, simState.environment === "ar");
 
   // Update active 3D / AR environment (Studio, Meadow, Cozy Highrise, AR View)
   envManager.update(elapsedTime, simState.windStrength, creature.root);
+
+  combinedCreatureVelocity.copy(creature.animState.velocity).add(desktopDragVelocity);
 
   let physicsTexture = gpuPhysics.fallbackTexture;
   if (simState.gpuFurEnabled) {
@@ -532,7 +687,7 @@ function animate() {
       time: elapsedTime,
       dt,
       windStrength: simState.windStrength,
-      creatureVelocity: creature.animState.velocity,
+      creatureVelocity: combinedCreatureVelocity,
       creatureAngularVel: creature.animState.angularVelocity,
       pointerLocalPos,
       pointerVelocity,
@@ -542,7 +697,7 @@ function animate() {
   } else {
     // Lightweight WebGL analytical spring-damper inertia (Zero GPGPU RTT passes)
     webglForceTmp.set(0, -0.32, 0);
-    webglForceTmp.addScaledVector(creature.animState.velocity, -1.65);
+    webglForceTmp.addScaledVector(combinedCreatureVelocity, -1.65);
     if (isPointerOverCreature) {
       webglForceTmp.addScaledVector(pointerVelocity, 0.85);
     }
