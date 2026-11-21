@@ -527,6 +527,51 @@ export function createMonsterAudio({ enabled = true } = {}) {
     });
   }
 
+  // 6. Soft Cozy Sleepy Monster Snore ("hrrr-pfff...")
+  function playSnore() {
+    const ac = ensureContext();
+    if (!ac || !masterGain) return;
+
+    const now = ac.currentTime;
+    const dur = 0.78;
+    const jitter = 0.92 + Math.random() * 0.14;
+
+    const filter = ac.createBiquadFilter();
+    filter.type = "lowpass";
+    filter.frequency.setValueAtTime(260 * jitter, now);
+    filter.frequency.exponentialRampToValueAtTime(160 * jitter, now + dur);
+    filter.Q.value = 3.0;
+
+    const osc = ac.createOscillator();
+    osc.type = "sawtooth";
+    osc.frequency.setValueAtTime(64 * jitter, now);
+    osc.frequency.exponentialRampToValueAtTime(52 * jitter, now + dur);
+
+    // Gentle snore flutter
+    const flutter = ac.createOscillator();
+    const flutterGain = ac.createGain();
+    flutter.frequency.value = 17;
+    flutterGain.gain.value = 10;
+    flutter.connect(flutterGain);
+    flutterGain.connect(osc.frequency);
+
+    const env = ac.createGain();
+    env.gain.setValueAtTime(0.0001, now);
+    env.gain.linearRampToValueAtTime(0.2, now + 0.24);
+    env.gain.exponentialRampToValueAtTime(0.0001, now + dur);
+
+    osc.connect(filter);
+    filter.connect(env);
+    env.connect(masterGain);
+
+    addBreathNoise(ac, now + 0.1, masterGain, 0.55, 620, 0.07);
+
+    osc.start(now);
+    flutter.start(now);
+    osc.stop(now + dur + 0.04);
+    flutter.stop(now + dur + 0.04);
+  }
+
   function setEnabled(flag) {
     isEnabled = Boolean(flag);
     if (!isEnabled && ctx && purrGain) {
@@ -542,6 +587,7 @@ export function createMonsterAudio({ enabled = true } = {}) {
     playPickup,
     playDrop,
     playHappyTrill,
+    playSnore,
     updatePetting,
     setEnabled,
     isEnabled: () => isEnabled,

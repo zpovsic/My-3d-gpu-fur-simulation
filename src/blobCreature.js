@@ -377,6 +377,40 @@ export function createBlobCreature() {
   let targetFacingPitch = 0.0;
   let faceViewerHoldTimer = 0.0;
 
+  // Desktop crawling gait state (inchworm scrunch-stretch + side-to-side waddle)
+  let crawlActive = false;
+  let crawlBlend = 0.0;
+  let crawlPhase = 0.0;
+  let crawlTargetDirX = 0.0;
+  let crawlTargetDirY = 0.0;
+  let crawlDirX = 0.0;
+  let crawlDirY = 0.0;
+
+  // Cozy sleeping state (melted posture, slow deep breathing, closed eyes)
+  let sleepActive = false;
+  let sleepBlend = 0.0;
+
+  function setSleeping(active) {
+    sleepActive = Boolean(active);
+    if (sleepActive) {
+      crawlActive = false;
+    }
+  }
+
+  function setCrawlState(active, dirX = 0.0, dirY = 0.0, syncedPhase = null) {
+    crawlActive = Boolean(active) && !sleepActive;
+    if (crawlActive) {
+      const len = Math.hypot(dirX, dirY);
+      if (len > 1e-4) {
+        crawlTargetDirX = dirX / len;
+        crawlTargetDirY = dirY / len;
+      }
+      if (typeof syncedPhase === "number" && Number.isFinite(syncedPhase)) {
+        crawlPhase = syncedPhase;
+      }
+    }
+  }
+
   function placeAt(targetWorldPos, normal, animate = true, cameraPos = null) {
     if (!targetWorldPos) return;
     isPlaced = true;
@@ -542,17 +576,56 @@ export function createBlobCreature() {
     facingPitch += (targetFacingPitch - facingPitch) * Math.min(1.0, safeDt * 12.0);
 
     const s = animState.baseScale;
-    const breath = Math.sin(animState.time * 2.3) * 0.035;
-    const bodyLookScale = isPlaced || isARMode ? (faceViewerHoldTimer > 0 ? 0.0 : 0.06) : 1.0;
+    // Smoothly blend in/out of sleeping pose
+    const targetSleep = sleepActive ? 1.0 : 0.0;
+    sleepBlend += (targetSleep - sleepBlend) * Math.min(1.0, safeDt * 3.5);
+    const awakeWeight = 1.0 - sleepBlend;
+
+    const awakeBreath = Math.sin(animState.time * 2.3) * 0.035;
+    const sleepBreath = Math.sin(animState.time * 1.15) * 0.068;
+    const breath = awakeBreath * awakeWeight + sleepBreath * sleepBlend;
+    const bodyLookScale =
+      (isPlaced || isARMode ? (faceViewerHoldTimer > 0 ? 0.0 : 0.06) : 1.0) * awakeWeight;
+
+    // Smoothly blend in/out of inchworm crawling gait
+    const targetCrawl = crawlActive && !sleepActive ? 1.0 : 0.0;
+    crawlBlend += (targetCrawl - crawlBlend) * Math.min(1.0, safeDt * 6.5);
+    if (crawlBlend > 0.002) {
+      crawlPhase += safeDt * 5.2;
+      crawlDirX += (crawlTargetDirX - crawlDirX) * Math.min(1.0, safeDt * 7.0);
+      crawlDirY += (crawlTargetDirY - crawlDirY) * Math.min(1.0, safeDt * 7.0);
+    }
+
+    // Inchworm scrunch (+1 = arch/gather tall) & reach (-1 = stretch flat & push forward)
+    const scrunch = Math.sin(crawlPhase);
+    const pushPhase = -scrunch; // positive during forward stretch-push
+    const waddle = Math.sin(crawlPhase * 0.5); // alternating left/right paw paddle
+    const waddleYaw = Math.cos(crawlPhase * 0.5);
+
+    const idleWeight = (1.0 - crawlBlend * 0.65) * awakeWeight;
     const swayX =
-      (Math.sin(animState.time * 1.35) * 0.06 + animState.currentLook.x * 0.15 * bodyLookScale) * s;
+      (Math.sin(animState.time * 1.35) * 0.06 * idleWeight +
+        animState.currentLook.x * 0.15 * bodyLookScale * (1.0 - crawlBlend * 0.65) +
+        crawlDirX * pushPhase * 0.045 * crawlBlend) *
+      s;
+    const crawlArchY =
+      (Math.max(0.0, scrunch) * 0.075 - 0.065 + Math.abs(waddle) * 0.022) * crawlBlend;
+    const sleepSinkY = (-0.095 + Math.sin(animState.time * 1.15) * 0.024) * sleepBlend;
     const jumpY =
-      (Math.sin(animState.time * 2.3) * 0.045 +
+      (Math.sin(animState.time * 2.3) * 0.045 * idleWeight +
+        crawlArchY +
+        sleepSinkY +
         Math.abs(Math.sin(animState.boopPhase)) * animState.boopImpulse * 0.32) *
       s;
 
-    const squash =
-      1.0 + breath + Math.cos(animState.boopPhase * 2.0) * animState.boopImpulse * 0.14;
+    const baseSquash =
+      1.0 +
+      breath * (1.0 - crawlBlend * 0.5) +
+      Math.cos(animState.boopPhase * 2.0) * animState.boopImpulse * 0.14;
+    // Crawling compresses vertically when stretching out and arches taller when scrunching in
+    const crawlScaleY = 1.0 + (scrunch * 0.14 - 0.04) * crawlBlend - 0.14 * sleepBlend;
+    const crawlScaleX = 1.0 + (-scrunch * 0.14 + 0.03) * crawlBlend + 0.09 * sleepBlend;
+    const crawlScaleZ = 1.0 + (-scrunch * 0.05 + 0.03) * crawlBlend + 0.07 * sleepBlend;
 
     const prevX = root.position.x;
     const prevY = root.position.y;
@@ -561,17 +634,27 @@ export function createBlobCreature() {
     const prevRotY = root.rotation.y;
 
     root.position.set(anchorPos.x + swayX, anchorPos.y + jumpY + hop, anchorPos.z);
-    root.scale.set((1.0 / Math.sqrt(squash)) * s, squash * s, (1.0 / Math.sqrt(squash)) * s);
+    root.scale.set(
+      (1.0 / Math.sqrt(baseSquash)) * crawlScaleX * s,
+      baseSquash * crawlScaleY * s,
+      (1.0 / Math.sqrt(baseSquash)) * crawlScaleZ * s,
+    );
     root.rotation.y =
       facingYaw +
-      animState.currentLook.x * 0.38 * bodyLookScale +
-      Math.sin(animState.time * 0.9) * (isPlaced ? 0.03 : 0.08);
+      animState.currentLook.x * 0.38 * bodyLookScale * (1.0 - crawlBlend * 0.65) +
+      Math.sin(animState.time * 0.9) * (isPlaced ? 0.03 : 0.08) * idleWeight +
+      (crawlDirX * 0.44 + waddleYaw * 0.14) * crawlBlend;
     root.rotation.x =
       facingPitch -
-      animState.currentLook.y * 0.22 * bodyLookScale +
-      Math.cos(animState.time * 1.8) * (isPlaced ? 0.02 : 0.04);
+      animState.currentLook.y * 0.22 * bodyLookScale * (1.0 - crawlBlend * 0.65) +
+      Math.cos(animState.time * 1.8) * (isPlaced ? 0.02 : 0.04) * idleWeight +
+      (0.2 + pushPhase * 0.12 - crawlDirY * 0.16) * crawlBlend +
+      (0.16 + Math.sin(animState.time * 1.15) * 0.03) * sleepBlend;
     root.rotation.z =
-      -(swayX / s) * 0.35 + Math.sin(animState.boopPhase) * animState.boopImpulse * 0.18;
+      -(swayX / s) * 0.35 * idleWeight +
+      (waddle * 0.2 - crawlDirX * pushPhase * 0.08) * crawlBlend +
+      0.13 * sleepBlend +
+      Math.sin(animState.boopPhase) * animState.boopImpulse * 0.18;
 
     // Compute instantaneous creature velocity & angular velocity for GPGPU fur inertia
     animState.velocity.set(
@@ -600,11 +683,17 @@ export function createBlobCreature() {
     if (animState.boopImpulse > 0.25) {
       blinkScaleY = Math.min(blinkScaleY, 0.18);
     }
+    if (sleepBlend > 0.01) {
+      blinkScaleY = Math.min(blinkScaleY, 1.0 - sleepBlend * 0.9);
+    }
 
     for (const eye of eyes) {
       eye.pivot.scale.y = blinkScaleY;
-      eye.catchlightMain.position.x = -eye.side * 0.042 + animState.currentLook.x * 0.028;
-      eye.catchlightMain.position.y = 0.052 + animState.currentLook.y * 0.025;
+      eye.catchlightMain.visible = sleepBlend < 0.72;
+      eye.catchlightSub.visible = sleepBlend < 0.72;
+      eye.catchlightMain.position.x =
+        -eye.side * 0.042 + animState.currentLook.x * 0.028 * awakeWeight;
+      eye.catchlightMain.position.y = 0.052 + animState.currentLook.y * 0.025 * awakeWeight;
     }
   }
 
@@ -615,6 +704,9 @@ export function createBlobCreature() {
     skinMaterial,
     animState,
     setEnvironmentScale,
+    setCrawlState,
+    setSleeping,
+    isSleeping: () => sleepActive,
     triggerBoop,
     placeAt,
     resetPlacement,

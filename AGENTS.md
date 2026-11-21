@@ -33,14 +33,20 @@ release. Add a tool name to select part of the graph. For example, run
 ## Learned User Preferences
 
 - Keep HTML free of inline `style` attributes; place styling rules in `style.css`.
-- Default the Mochi-Puff desktop pet to stationary placement where dragged (roaming off by default, toggleable from the context menu), with interactive monster sound effects enabled and auto-start/desktop shortcut support.
+- Default the Mochi-Puff desktop pet to stationary placement where dragged (`Stay Put`), with context-menu toggles for slow `Roam Along Taskbar` (respecting the actual Windows taskbar edge) and `Roam Whole Desktop`, interactive monster sound effects, and Windows auto-start.
+- Animate desktop pet roaming with a slow inchworm crawling gait and periodic sleeping naps (`z Z z Z` bubbles and soft snores), keeping enough transparent framing headroom so crawling and long fur never clip at window edges.
+- Auto-save changes made in Full Studio and apply them live to the running Desktop Mochi-Puff pet across restarts.
+- Register Windows auto-start apps under `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` rather than the legacy `Start Menu\Programs\Startup` folder, which Explorer skips on boot on this setup.
 - Keep `package.json` scripts and hooks compatible with Windows PowerShell (avoid bash-only syntax such as `[ -d ... ]`).
 
 ## Learned Workspace Facts
 
 - Run `vp build` before `vp run start` (`node server.js` on port 3000 serves `dist/` when present); use `vp run dev` for hot-reload development.
 - `index.html` intentionally hides the grass-painter navigation pill via `style.css` (`#page-nav a[href*="grass.html"]`) and the `hidden` attribute; the grass scene remains accessible directly at `/grass.html`.
-- The native Windows desktop pet wrapper lives in `desktop/` (.NET 10 WinForms + WebView2 with DWM per-pixel alpha transparency), loads the built web app in `?desktop=1` mode, and stores settings in `%LOCALAPPDATA%\DesktopMochi\settings.json`.
+- The native Windows desktop pet wrapper lives in `desktop/` (.NET 10 WinForms + WebView2 with DWM per-pixel alpha transparency), loads the built web app in `?desktop=1` mode, stores host settings in `%LOCALAPPDATA%\DesktopMochi\settings.json`, and manages `Start with Windows` via `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`.
 - Build the desktop pet with `vp run desktop:build` (`vp build && dotnet build desktop/DesktopMochi.csproj -c Release`) and launch it with `vp run desktop`; stop any running `DesktopMochi` process before rebuilding the executable.
-- Interactive creature sound effects are procedurally synthesized with the Web Audio API in `src/monsterAudio.js` without external audio assets, and WebView2 initializes with `--autoplay-policy=no-user-gesture-required`.
+- Full Studio and Desktop Mochi share persisted appearance state in `%LOCALAPPDATA%\DesktopMochi\appearance.json` via `GET`/`POST /api/mochi-appearance` in both `server.js` and `vite.config.ts`; `src/main.js` auto-saves edits and `desktop/MochiForm.cs` applies updates live with a debounced `FileSystemWatcher`.
+- Desktop Mochi implements 3 movement modes (`Stay Put`, `Roam Along Taskbar` via `SHAppBarMessage`, `Roam Whole Desktop`), synchronized inchworm crawling and nap poses (`src/blobCreature.js` + `desktop/MochiForm.cs`), and double-click / context-menu launch-or-focus for MateCraft.
+- Desktop pet anti-clipping combines dynamic camera headroom (`updateDesktopPetCamera()` scaled by `furLength` in `src/main.js`) with `1.32x` transparent click-through canvas padding (`CanvasSizeFor` in `desktop/MochiForm.cs`).
+- Interactive creature sound effects (boops, petting, snoring) are procedurally synthesized with the Web Audio API in `src/monsterAudio.js` without external audio assets, and WebView2 initializes with `--autoplay-policy=no-user-gesture-required`.
 - Environment secrets such as `GEMINI_API_KEY` belong in `.env.local` (excluded by `.gitignore`).

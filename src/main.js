@@ -145,6 +145,19 @@ function updateLightingFromState() {
 }
 
 // Helper to center the camera & OrbitControls point-of-focus on Mochi-Puff with appropriate framing across environments
+function updateDesktopPetCamera() {
+  if (!isDesktopPet) return;
+  const furLen = Number.isFinite(simState.furLength) ? simState.furLength : 0.38;
+  // Generous dynamic framing based on furLength so cheeks, ears, long fur, crawling stretch,
+  // waddle roll & boop jump NEVER touch or clip against the transparent square window edge
+  const zDist = 7.1 + furLen * 2.05;
+  controls.target.set(0.0, 0.14, 0.0);
+  camera.position.set(0.0, 0.38, zDist);
+  controls.minDistance = zDist * 0.7;
+  controls.maxDistance = zDist * 1.5;
+  controls.update();
+}
+
 function applyCameraFramingForEnvironment(envId) {
   const isDesk = envId === "highrise";
   const isAR = envId === "ar";
@@ -161,13 +174,8 @@ function applyCameraFramingForEnvironment(envId) {
     : 1.0;
 
   if (isDesktopPet) {
-    // Generous framing for transparent square desktop pet window so cheeks, ears, fur tips & boop jump never clip
     creature.setEnvironmentScale(1.0, 0.0, 0.0);
-    controls.target.set(0.0, 0.06, 0.0);
-    camera.position.set(0.0, 0.36, 5.85);
-    controls.minDistance = 3.8;
-    controls.maxDistance = 8.5;
-    controls.update();
+    updateDesktopPetCamera();
     return;
   }
 
@@ -240,6 +248,191 @@ const initialEnvId = isDesktopPet
 applyEnvironmentPreset(initialEnvId);
 if (isDesktopPet) {
   envManager.setDesktopPetMode(true);
+}
+
+const APPEARANCE_KEYS = new Set([
+  "environment",
+  "furLength",
+  "furDensity",
+  "clumping",
+  "curliness",
+  "baseColor",
+  "tipColor",
+  "roughness",
+  "specular",
+  "keyColor",
+  "lightAngle",
+  "lightIntensity",
+  "rimIntensity",
+  "windStrength",
+  "toggleGPUFur",
+]);
+
+const SAVABLE_ENV_IDS = new Set(["studio", "meadow", "highrise"]);
+
+function getCurrentAppearanceSnapshot() {
+  const matchedPreset = FUR_PRESETS.find(
+    (p) =>
+      p.baseColor.toLowerCase() === String(simState.baseColor || "").toLowerCase() &&
+      p.tipColor.toLowerCase() === String(simState.tipColor || "").toLowerCase() &&
+      Math.abs(p.furLength - simState.furLength) < 0.005 &&
+      Math.abs(p.furDensity - simState.furDensity) < 0.005 &&
+      Math.abs(p.clumping - simState.clumping) < 0.005 &&
+      Math.abs(p.curliness - simState.curliness) < 0.005,
+  );
+  return {
+    name: matchedPreset ? matchedPreset.name : "Custom",
+    environment: SAVABLE_ENV_IDS.has(simState.environment) ? simState.environment : "studio",
+    baseColor: simState.baseColor,
+    tipColor: simState.tipColor,
+    furLength: simState.furLength,
+    furDensity: simState.furDensity,
+    clumping: simState.clumping,
+    curliness: simState.curliness,
+    roughness: simState.roughness,
+    specular: simState.specular,
+    keyColor: simState.keyColor,
+    lightAngle: simState.lightAngle,
+    lightIntensity: simState.lightIntensity,
+    rimIntensity: simState.rimIntensity,
+    windStrength: simState.windStrength,
+    gpuFurEnabled: Boolean(simState.gpuFurEnabled),
+  };
+}
+
+let appearanceSaveTimer = null;
+
+function flushAppearanceSave({ useBeacon = false } = {}) {
+  if (isDesktopPet) return;
+  if (appearanceSaveTimer !== null) {
+    clearTimeout(appearanceSaveTimer);
+    appearanceSaveTimer = null;
+  }
+  const snapshot = getCurrentAppearanceSnapshot();
+  const payload = JSON.stringify(snapshot);
+  try {
+    localStorage.setItem("mochiAppearance", payload);
+  } catch {
+    // Ignore storage errors
+  }
+  if (useBeacon && typeof navigator !== "undefined" && navigator.sendBeacon) {
+    try {
+      navigator.sendBeacon(
+        "/api/mochi-appearance",
+        new Blob([payload], { type: "application/json" }),
+      );
+      return;
+    } catch {
+      // Fall through to fetch
+    }
+  }
+  fetch("/api/mochi-appearance", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: payload,
+    keepalive: true,
+  })
+    .then((res) => {
+      if (res.ok && hudHint) {
+        hudHint.textContent = "Saved changes · Synced live to Desktop Mochi-Puff";
+      }
+    })
+    .catch(() => {
+      // Standalone static preview without API
+    });
+}
+
+function scheduleAppearanceSave() {
+  if (isDesktopPet) return;
+  if (appearanceSaveTimer !== null) {
+    clearTimeout(appearanceSaveTimer);
+  }
+  appearanceSaveTimer = setTimeout(() => {
+    flushAppearanceSave();
+  }, 120);
+}
+
+if (!isDesktopPet) {
+  window.addEventListener("pagehide", () => {
+    if (appearanceSaveTimer !== null) {
+      flushAppearanceSave({ useBeacon: true });
+    }
+  });
+}
+
+function applyAppearanceState(data, { silent = true, syncUi = false } = {}) {
+  if (!data || typeof data !== "object") return false;
+  const u = furSystem.sharedUniforms;
+  let changed = false;
+
+  if (
+    !isDesktopPet &&
+    !urlEnvParam &&
+    typeof data.environment === "string" &&
+    SAVABLE_ENV_IDS.has(data.environment) &&
+    simState.environment !== data.environment
+  ) {
+    applyEnvironmentPreset(data.environment);
+    changed = true;
+  }
+
+  const numProps = [
+    ["furLength", (v) => (u.uFurLength.value = v)],
+    ["furDensity", (v) => furSystem.updateDensity(v)],
+    ["clumping", (v) => (u.uClumping.value = v)],
+    ["curliness", (v) => (u.uCurliness.value = v)],
+    ["roughness", (v) => (u.uRoughness.value = v)],
+    ["specular", (v) => (u.uSpecular.value = v)],
+    ["windStrength", (v) => (u.uWindStrength.value = v)],
+    ["lightAngle", null],
+    ["lightIntensity", null],
+    ["rimIntensity", null],
+  ];
+
+  for (const [k, applyFn] of numProps) {
+    if (typeof data[k] === "number" && Number.isFinite(data[k])) {
+      simState[k] = data[k];
+      if (applyFn) applyFn(data[k]);
+      changed = true;
+    }
+  }
+
+  const hexRe = /^#[0-9a-fA-F]{6}$/;
+  if (typeof data.baseColor === "string" && hexRe.test(data.baseColor)) {
+    simState.baseColor = data.baseColor;
+    u.uBaseColor.value.set(data.baseColor);
+    creature.skinMaterial.color.set(data.baseColor).multiplyScalar(0.55);
+    changed = true;
+  }
+  if (typeof data.tipColor === "string" && hexRe.test(data.tipColor)) {
+    simState.tipColor = data.tipColor;
+    u.uTipColor.value.set(data.tipColor);
+    changed = true;
+  }
+  if (typeof data.keyColor === "string" && hexRe.test(data.keyColor)) {
+    simState.keyColor = data.keyColor;
+    changed = true;
+  }
+  if (typeof data.gpuFurEnabled === "boolean") {
+    simState.gpuFurEnabled = data.gpuFurEnabled;
+    furSystem.setGPUFurEnabled(data.gpuFurEnabled);
+    changed = true;
+  }
+
+  if (changed) {
+    updateLightingFromState();
+    updateDesktopPetCamera();
+    if (syncUi && typeof ui !== "undefined") {
+      ui.syncUI();
+      ui.setGPUFurEnabled(Boolean(simState.gpuFurEnabled));
+    }
+    if (!silent) {
+      creature.triggerBoop();
+      boopShockwave = 0.75;
+      monsterAudio.playHappyTrill();
+    }
+  }
+  return changed;
 }
 
 // 5. Build Minimalist UI Controls
@@ -358,7 +551,37 @@ const ui = createMinimalUI(uiContainer, simState, (key, value) => {
     default:
       break;
   }
+
+  if (!isDesktopPet && APPEARANCE_KEYS.has(key)) {
+    scheduleAppearanceSave();
+  }
 });
+
+// Load saved Desktop/Studio appearance on startup in Full Studio mode
+if (!isDesktopPet) {
+  (async () => {
+    try {
+      const res = await fetch("/api/mochi-appearance", { cache: "no-store" });
+      if (res.ok) {
+        const saved = await res.json();
+        if (saved && Object.keys(saved).length > 0) {
+          applyAppearanceState(saved, { silent: true, syncUi: true });
+          return;
+        }
+      }
+    } catch {
+      // Fallback to localStorage below
+    }
+    try {
+      const localRaw = localStorage.getItem("mochiAppearance");
+      if (localRaw) {
+        applyAppearanceState(JSON.parse(localRaw), { silent: true, syncUi: true });
+      }
+    } catch {
+      // Ignore invalid cached JSON
+    }
+  })();
+}
 
 let tapToPlaceEnabled = true;
 
@@ -410,6 +633,7 @@ function isEventOnUIOverlay(e) {
 
 let desktopDragPending = false;
 let desktopOrbiting = false;
+let snoreCountdown = 2.8;
 const desktopDragVelocity = new THREE.Vector3(0, 0, 0);
 const combinedCreatureVelocity = new THREE.Vector3(0, 0, 0);
 
@@ -419,17 +643,43 @@ function postDesktopMessage(payload) {
   }
 }
 
+function applySleepState(sleeping, notifyHost = false) {
+  const next = Boolean(sleeping);
+  const wasSleeping = creature.isSleeping();
+  creature.setSleeping(next);
+  document.body.classList.toggle("mochi-sleeping", next);
+  if (next && !wasSleeping) {
+    snoreCountdown = 2.2 + Math.random() * 1.4;
+  }
+  if (!next && wasSleeping && notifyHost) {
+    postDesktopMessage({ type: "wokeUp" });
+  }
+}
+
 if (isDesktopPet) {
+  const sleepZzz = document.createElement("div");
+  sleepZzz.className = "sleep-zzz";
+  sleepZzz.setAttribute("aria-hidden", "true");
+  const zChars = ["z", "Z", "z", "Z"];
+  zChars.forEach((ch, idx) => {
+    const span = document.createElement("span");
+    span.className = `sleep-z sleep-z-${idx + 1}`;
+    span.textContent = ch;
+    sleepZzz.appendChild(span);
+  });
+  document.body.appendChild(sleepZzz);
+
   window.addEventListener("contextmenu", (e) => {
     e.preventDefault();
     postDesktopMessage({ type: "contextMenu" });
   });
 
   window.addEventListener("dblclick", () => {
-    applyCameraFramingForEnvironment("studio");
+    applySleepState(false, true);
     creature.triggerBoop();
     boopShockwave = 1.0;
     monsterAudio.playBoop();
+    postDesktopMessage({ type: "openMateCraft" });
   });
 
   window.__mochiDesktop = {
@@ -439,22 +689,13 @@ if (isDesktopPet) {
           ? FUR_PRESETS[nameOrIndex]
           : FUR_PRESETS.find((p) => p.name === nameOrIndex);
       if (!preset) return;
-      Object.assign(simState, preset);
-      const u = furSystem.sharedUniforms;
-      u.uBaseColor.value.set(preset.baseColor);
-      u.uTipColor.value.set(preset.tipColor);
-      u.uFurLength.value = preset.furLength;
-      u.uClumping.value = preset.clumping;
-      u.uCurliness.value = preset.curliness;
-      u.uRoughness.value = preset.roughness;
-      u.uSpecular.value = preset.specular;
-      furSystem.updateDensity(preset.furDensity);
-      creature.skinMaterial.color.set(preset.baseColor).multiplyScalar(0.55);
-      creature.triggerBoop();
-      boopShockwave = 0.8;
-      if (!silent) {
-        monsterAudio.playHappyTrill();
-      }
+      applyAppearanceState(preset, { silent, syncUi: false });
+    },
+    applyAppearance(data, silent = false) {
+      applyAppearanceState(data, { silent, syncUi: false });
+    },
+    getAppearance() {
+      return getCurrentAppearanceSnapshot();
     },
     setGPUFur(enabled) {
       const flag = Boolean(enabled);
@@ -476,12 +717,19 @@ if (isDesktopPet) {
         0,
       );
     },
+    setCrawlState(active, dirX = 0, dirY = 0, phase = null) {
+      creature.setCrawlState(Boolean(active), Number(dirX) || 0, Number(dirY) || 0, phase);
+    },
+    setSleeping(active) {
+      applySleepState(Boolean(active), false);
+    },
     endDrag() {
       creature.triggerBoop();
       boopShockwave = 0.45;
       monsterAudio.playDrop();
     },
     boop() {
+      applySleepState(false, true);
       creature.triggerBoop();
       boopShockwave = 1.0;
       monsterAudio.playBoop();
@@ -501,6 +749,7 @@ window.addEventListener("pointermove", (e) => {
     const moveDist = Math.hypot(e.clientX - pointerDownPos.x, e.clientY - pointerDownPos.y);
     if (moveDist >= 5) {
       desktopDragPending = false;
+      applySleepState(false, true);
       monsterAudio.playPickup();
       postDesktopMessage({ type: "startDrag" });
       return;
@@ -566,6 +815,7 @@ window.addEventListener("pointerup", (e) => {
     }
     const moveDist = Math.hypot(e.clientX - pointerDownPos.x, e.clientY - pointerDownPos.y);
     if (wasDragPending && e.button === 0 && moveDist < 6) {
+      applySleepState(false, true);
       creature.triggerBoop();
       boopShockwave = 1.0;
       monsterAudio.playBoop();
@@ -670,7 +920,19 @@ function animate() {
   // Decay pointer velocity & desktop drag impulse smoothly
   pointerVelocity.multiplyScalar(Math.exp(-dt * 12.0));
   desktopDragVelocity.multiplyScalar(Math.exp(-dt * 9.0));
-  monsterAudio.updatePetting(pointerVelocity.length(), isPointerOverCreature);
+  const petSpeed = pointerVelocity.length();
+  if (isDesktopPet && creature.isSleeping()) {
+    if (isPointerOverCreature && petSpeed > 1.2) {
+      applySleepState(false, true);
+    } else {
+      snoreCountdown -= dt;
+      if (snoreCountdown <= 0) {
+        monsterAudio.playSnore();
+        snoreCountdown = 4.6 + Math.random() * 1.8;
+      }
+    }
+  }
+  monsterAudio.updatePetting(petSpeed, isPointerOverCreature && !creature.isSleeping());
 
   // Update creature breathing, eye tracking, viewer-facing AR orientation, and bounce inertia
   creature.update(dt, pointerNDC, camera.position, simState.environment === "ar");

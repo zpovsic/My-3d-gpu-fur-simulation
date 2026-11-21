@@ -1125,3 +1125,79 @@ body.desktop-pet #canvas-container,
 body.desktop-pet #canvas-container canvas {
   background: transparent !important;
 }
+
+/* Floating animated zzZZzZz sleep indicator for Desktop Mochi */
+.sleep-zzz {
+  position: fixed;
+  top: 12%;
+  right: 15%;
+  width: 40%;
+  height: 40%;
+  pointer-events: none;
+  z-index: 20;
+  opacity: 0;
+  transition: opacity 0.4s ease;
+}
+
+body.mochi-sleeping .sleep-zzz {
+  opacity: 1;
+}
+
+.sleep-z {
+  position: absolute;
+  bottom: 10%;
+  left: 14%;
+  font-family: var(--font-sans);
+  font-weight: 800;
+  color: #e0e7ff;
+  text-shadow:
+    0 2px 8px rgba(49, 46, 129, 0.85),
+    0 0 12px rgba(165, 180, 252, 0.9),
+    -1px -1px 0 rgba(30, 27, 75, 0.85),
+    1px -1px 0 rgba(30, 27, 75, 0.85),
+    -1px 1px 0 rgba(30, 27, 75, 0.85),
+    1px 1px 0 rgba(30, 27, 75, 0.85);
+  opacity: 0;
+  will-change: transform, opacity;
+}
+
+body.mochi-sleeping .sleep-z-1 {
+  font-size: clamp(12px, 5.5vw, 20px);
+  animation: mochiFloatZ 2.9s ease-in-out infinite 0s;
+}
+
+body.mochi-sleeping .sleep-z-2 {
+  font-size: clamp(16px, 7.5vw, 28px);
+  left: 34%;
+  animation: mochiFloatZ 2.9s ease-in-out infinite 0.72s;
+}
+
+body.mochi-sleeping .sleep-z-3 {
+  font-size: clamp(20px, 9.5vw, 35px);
+  left: 52%;
+  animation: mochiFloatZ 2.9s ease-in-out infinite 1.45s;
+}
+
+body.mochi-sleeping .sleep-z-4 {
+  font-size: clamp(14px, 6.2vw, 23px);
+  left: 24%;
+  animation: mochiFloatZ 2.9s ease-in-out infinite 2.18s;
+}
+
+@keyframes mochiFloatZ {
+  0% {
+    opacity: 0;
+    transform: translate(0, 8px) scale(0.55) rotate(-10deg);
+  }
+  20% {
+    opacity: 0.98;
+  }
+  55% {
+    opacity: 0.92;
+    transform: translate(12px, -28px) scale(1.02) rotate(8deg);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(22px, -64px) scale(1.22) rotate(-6deg);
+  }
+}

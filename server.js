@@ -1,11 +1,59 @@
 const http = require("http");
 const fs = require("fs");
+const os = require("os");
 const path = require("path");
 
 const PORT = Number(process.env.PORT) || 3000;
 const HOST = "0.0.0.0";
 const DIST_DIR = path.join(__dirname, "dist");
 const ROOT_DIR = fs.existsSync(DIST_DIR) ? DIST_DIR : __dirname;
+const MOCHI_APP_DATA = path.join(
+  process.env.LOCALAPPDATA || path.join(os.homedir(), ".local", "share"),
+  "DesktopMochi",
+);
+const APPEARANCE_PATH = path.join(MOCHI_APP_DATA, "appearance.json");
+
+function sanitizeAppearance(raw) {
+  if (!raw || typeof raw !== "object") return null;
+  const out = {};
+  const hexRe = /^#[0-9a-fA-F]{6}$/;
+  const numBounds = {
+    furLength: [0.05, 0.85],
+    furDensity: [0.1, 1.0],
+    clumping: [0.0, 1.0],
+    curliness: [0.0, 1.0],
+    roughness: [0.05, 0.95],
+    specular: [0.0, 1.0],
+    lightAngle: [-180, 180],
+    lightIntensity: [0.1, 3.0],
+    rimIntensity: [0.0, 3.0],
+    windStrength: [0.0, 3.0],
+  };
+  for (const key of ["baseColor", "tipColor", "keyColor"]) {
+    if (typeof raw[key] === "string" && hexRe.test(raw[key].trim())) {
+      out[key] = raw[key].trim();
+    }
+  }
+  for (const [key, [min, max]] of Object.entries(numBounds)) {
+    const val = Number(raw[key]);
+    if (Number.isFinite(val)) {
+      out[key] = Math.max(min, Math.min(max, val));
+    }
+  }
+  if (typeof raw.gpuFurEnabled === "boolean") {
+    out.gpuFurEnabled = raw.gpuFurEnabled;
+  }
+  if (typeof raw.name === "string" && raw.name.trim().length > 0 && raw.name.length <= 48) {
+    out.name = raw.name.trim();
+  }
+  if (
+    typeof raw.environment === "string" &&
+    ["studio", "meadow", "highrise"].includes(raw.environment)
+  ) {
+    out.environment = raw.environment;
+  }
+  return out;
+}
 
 const MIME_TYPES = {
   ".html": "text/html; charset=utf-8",
@@ -37,6 +85,53 @@ const server = http.createServer((req, res) => {
     if (pathname === "/healthz" || pathname === "/_ah/health") {
       res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
       res.end("OK");
+      return;
+    }
+
+    if (pathname === "/api/mochi-appearance") {
+      if (req.method === "GET") {
+        let body = "{}";
+        if (fs.existsSync(APPEARANCE_PATH)) {
+          body = fs.readFileSync(APPEARANCE_PATH, "utf8");
+        }
+        res.writeHead(200, {
+          "Content-Type": "application/json; charset=utf-8",
+          "Cache-Control": "no-store",
+        });
+        res.end(body);
+        return;
+      }
+      if (req.method === "POST") {
+        let rawBody = "";
+        req.on("data", (chunk) => {
+          rawBody += chunk;
+          if (rawBody.length > 16384) {
+            req.destroy();
+          }
+        });
+        req.on("end", () => {
+          try {
+            const sanitized = sanitizeAppearance(JSON.parse(rawBody));
+            if (!sanitized) {
+              res.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
+              res.end(JSON.stringify({ ok: false, error: "Invalid payload" }));
+              return;
+            }
+            fs.mkdirSync(MOCHI_APP_DATA, { recursive: true });
+            const tmpPath = `${APPEARANCE_PATH}.tmp`;
+            fs.writeFileSync(tmpPath, JSON.stringify(sanitized, null, 2), "utf8");
+            fs.renameSync(tmpPath, APPEARANCE_PATH);
+            res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+            res.end(JSON.stringify({ ok: true }));
+          } catch (err) {
+            res.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
+            res.end(JSON.stringify({ ok: false, error: String(err) }));
+          }
+        });
+        return;
+      }
+      res.writeHead(405, { "Content-Type": "text/plain; charset=utf-8" });
+      res.end("Method Not Allowed");
       return;
     }
 
